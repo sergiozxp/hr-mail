@@ -41,6 +41,7 @@ jobs:
           Copy-Item -Recurse bin "$out/bin"
           Copy-Item -Recurse licenses "$out/licenses"
           Copy-Item README.md "$out/README.md"
+          Copy-Item LICENSE "$out/licenses/hr-mail-GPL-3.0.txt"
           $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "dev-$("${{ github.sha }}".Substring(0,7))" }
           Compress-Archive -Path $out -DestinationPath "hr-mail-$version-windows.zip"
           "ZIP_NAME=hr-mail-$version-windows.zip" | Out-File -Append $env:GITHUB_ENV

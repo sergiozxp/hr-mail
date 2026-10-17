@@ -1,5 +1,7 @@
 # Third-party programs bundled with hr-mail
 
+hr-mail itself is licensed under GPL-3.0-or-later (`hr-mail-GPL-3.0.txt` in the release, `LICENSE` in the repo).
+
 hr-mail ships these programs unmodified, as separate executables, in `bin/`.
 They are free software; their licenses are in this folder.
 

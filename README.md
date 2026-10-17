@@ -35,6 +35,12 @@ python hr_mail.py                  # run from source (Windows)
 Per-user data (settings, generated configs, Pat mailbox, logs) lives in
 `%LOCALAPPDATA%\hr-mail`.
 
-## Licenses
+## License
+
+Copyright (C) 2026 Sergio, XQ2CG.
+
+hr-mail is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. See [LICENSE](LICENSE).
 
 Bundled third-party programs and their licenses: [licenses/THIRD-PARTY.md](licenses/THIRD-PARTY.md).

@@ -13,6 +13,8 @@ Target users are hams who do not know what a console is. They must be able to in
 and use hr-mail **with the mouse only**. The most they will type is their callsign,
 a destination callsign and the message text.
 
+License: **GPL-3.0-or-later** (same family as Mercury).
+
 Language rules: **UI in Spanish**. Code, comments, README and commit messages in English.
 
 ---
@@ -87,7 +89,7 @@ frequency in v1.
     hr-mail.exe
     bin/mercury/   (mercury.exe + its DLLs, unmodified upstream release; mercury-ui.exe left out)
     bin/pat/       (pat.exe, unmodified upstream release; Pat only ships a 32-bit Windows build)
-    licenses/      (Mercury GPL, Pat MIT, hr-mail license, links to upstream source)
+    licenses/      (hr-mail GPL-3.0, Mercury GPL-3.0, Pat MIT, THIRD-PARTY.md with upstream source links)
   ```
 - **Process supervision**: hr-mail starts `mercury.exe` and `pat.exe http` as hidden child
   processes (`CREATE_NO_WINDOW`), captures their logs to `%LOCALAPPDATA%\hr-mail\logs\`,
