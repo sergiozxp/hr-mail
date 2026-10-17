@@ -1,0 +1,18 @@
+{
+  "mercury": {
+    "version": "1.9.19",
+    "url": "https://github.com/Rhizomatica/mercury/releases/download/v1.9.19/mercury-1.9.19-w64-e9f0072d.zip",
+    "sha256": "6b0e83185d5052d01e0d3041c9c6588023f9a0abe0196c62563dc33ce4467673",
+    "exe": "mercury.exe",
+    "exclude": ["mercury-ui.exe", "mercury.ini.example"],
+    "source": "https://github.com/Rhizomatica/mercury/tree/v1.9.19"
+  },
+  "pat": {
+    "version": "1.0.0",
+    "url": "https://github.com/la5nta/pat/releases/download/v1.0.0/pat_1.0.0_windows_i386.zip",
+    "sha256": "1fa3a21ff219c23c514d93c786561be0959e11e63c847b998b4bea6f0dab42c5",
+    "exe": "pat.exe",
+    "exclude": [],
+    "source": "https://github.com/la5nta/pat/tree/v1.0.0"
+  }
+}
