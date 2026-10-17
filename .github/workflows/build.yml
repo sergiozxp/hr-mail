@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a GitHub Release for the version in hrmail/__init__.py"
+        type: boolean
+        default: false
 
 permissions:
   contents: write  # needed to publish a Release on tags
@@ -42,7 +47,11 @@ jobs:
           Copy-Item -Recurse licenses "$out/licenses"
           Copy-Item README.md "$out/README.md"
           Copy-Item LICENSE "$out/licenses/hr-mail-GPL-3.0.txt"
-          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "dev-$("${{ github.sha }}".Substring(0,7))" }
+          $appVersion = python -c "import hrmail; print(hrmail.__version__)"
+          if ("${{ github.ref_type }}" -eq "tag") { $version = "${{ github.ref_name }}" }
+          elseif ("${{ inputs.release }}" -eq "true") { $version = "v$appVersion" }
+          else { $version = "dev-$("${{ github.sha }}".Substring(0,7))" }
+          "VERSION=$version" | Out-File -Append $env:GITHUB_ENV
           Compress-Archive -Path $out -DestinationPath "hr-mail-$version-windows.zip"
           "ZIP_NAME=hr-mail-$version-windows.zip" | Out-File -Append $env:GITHUB_ENV
 
@@ -51,8 +60,12 @@ jobs:
           name: hr-mail-windows
           path: ${{ env.ZIP_NAME }}
 
-      - name: Publish release (tags only)
-        if: github.ref_type == 'tag'
+      - name: Publish release (tags, or manual run with release=true)
+        if: github.ref_type == 'tag' || inputs.release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: hr-mail ${{ env.VERSION }}
+          body_path: docs/release-notes.md
           files: ${{ env.ZIP_NAME }}
