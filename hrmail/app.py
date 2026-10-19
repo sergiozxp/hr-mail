@@ -9,11 +9,86 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from . import __version__, civ, mercury, paths
+from . import __version__, mercury, paths, radios
 from . import settings as settings_mod
 from .pat import PatError
-from .settings import RADIO_IC7100, RADIO_VOX, Settings, is_valid_callsign, normalize_callsign
+from .settings import Settings, is_valid_callsign, normalize_callsign
 from .station import Station
+from .station import test_ptt as run_ptt_test
+
+RADIO_OTHER_LABEL = "Otro modelo (lista completa de hamlib)…"
+RADIO_VOX_LABEL = "Otra radio sin CAT (VOX, Digirig, CM108)"
+METHOD_LABELS = {
+    radios.PTT_CAT: "CAT por el cable USB de la radio (recomendado)",
+    radios.PTT_SERIAL: "Línea RTS/DTR de un puerto COM (Digirig, AIOC, cable casero)",
+    radios.PTT_CM108: "Interfaz con chip CM108 (GPIO)",
+    radios.PTT_VOX: "VOX (la radio transmite sola con el audio)",
+}
+METHOD_BY_LABEL = {label: key for key, label in METHOD_LABELS.items()}
+LINE_LABELS = {"rts": "RTS", "dtr": "DTR", "both": "RTS y DTR"}
+INVERT_LABELS = {"none": "Ninguna", "rts": "RTS", "dtr": "DTR", "both": "RTS y DTR"}
+PORT_SEPARATOR = " — "
+
+
+def _key_for(labels: dict[str, str], label: str, default: str) -> str:
+    return next((k for k, v in labels.items() if v == label), default)
+
+
+class ModelPicker:
+    """Searchable list of every radio Hamlib knows, mouse-friendly."""
+
+    def __init__(self, root: tk.Tk, models: list, on_done):
+        self.models, self.on_done = models, on_done
+        self.shown: list = []
+        self.top = top = tk.Toplevel(root)
+        top.title("Elegir modelo de radio")
+        top.transient(root)
+        top.geometry("520x480")
+        top.protocol("WM_DELETE_WINDOW", self.cancel)
+        frm = ttk.Frame(top, padding=10)
+        frm.pack(fill="both", expand=True)
+        ttk.Label(frm, text="Buscar (marca o modelo):").pack(anchor="w")
+        self.query = tk.StringVar()
+        entry = ttk.Entry(frm, textvariable=self.query)
+        entry.pack(fill="x", pady=(2, 6))
+        self.query.trace_add("write", lambda *_: self.filter())
+        lst = ttk.Frame(frm)
+        lst.pack(fill="both", expand=True)
+        self.listbox = tk.Listbox(lst, activestyle="dotbox")
+        bar = ttk.Scrollbar(lst, orient="vertical", command=self.listbox.yview)
+        self.listbox.configure(yscrollcommand=bar.set)
+        self.listbox.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        self.listbox.bind("<Double-Button-1>", lambda _e: self.accept())
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x", pady=(8, 0))
+        ttk.Button(btns, text="Cancelar", command=self.cancel).pack(side="right", padx=4)
+        ttk.Button(btns, text="Elegir", command=self.accept).pack(side="right", padx=4)
+        self.filter()
+        entry.focus_set()
+        try:
+            top.grab_set()
+        except tk.TclError:  # parent not viewable yet
+            pass
+
+    def filter(self) -> None:
+        words = self.query.get().lower().split()
+        self.shown = [m for m in self.models if all(w in f"{m.mfg} {m.model}".lower() for w in words)]
+        self.listbox.delete(0, "end")
+        for m in self.shown:
+            self.listbox.insert("end", f"{m.mfg}  {m.model}")
+
+    def accept(self) -> None:
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+        model = self.shown[sel[0]]
+        self.top.destroy()
+        self.on_done(model)
+
+    def cancel(self) -> None:
+        self.top.destroy()
+        self.on_done(None)
 
 
 class App:
@@ -25,9 +100,10 @@ class App:
         self.busy = False
         self.ui_queue: queue.Queue = queue.Queue()
         self.devices: tuple[list, list] = ([], [])
+        self.hamlib_models: list = []
 
-        root.title(f"hr-mail {__version__} — Etapa 1 (diagnóstico)")
-        root.minsize(720, 520)
+        root.title(f"hr-mail {__version__} — diagnóstico")
+        root.minsize(780, 640)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._build()
         self.root.after(100, self._drain_queue)
@@ -42,28 +118,81 @@ class App:
 
         cfg = ttk.LabelFrame(frm, text="Estación", padding=8)
         cfg.pack(fill="x")
+        cfg.columnconfigure(0, weight=1)
 
-        ttk.Label(cfg, text="Su indicativo:").grid(row=0, column=0, sticky="w", **pad)
+        row = ttk.Frame(cfg)
+        row.grid(row=0, column=0, sticky="w")
+        ttk.Label(row, text="Su indicativo:", width=14).pack(side="left", **pad)
         self.call_var = tk.StringVar(value=self.settings.callsign)
-        ttk.Entry(cfg, textvariable=self.call_var, width=12).grid(row=0, column=1, sticky="w", **pad)
+        ttk.Entry(row, textvariable=self.call_var, width=12).pack(side="left", **pad)
 
-        ttk.Label(cfg, text="Radio:").grid(row=1, column=0, sticky="w", **pad)
-        self.radio_var = tk.StringVar(value=self.settings.radio)
-        ttk.Radiobutton(cfg, text="ICOM IC-7100 (cable USB)", value=RADIO_IC7100,
-                        variable=self.radio_var).grid(row=1, column=1, sticky="w", **pad)
-        ttk.Radiobutton(cfg, text="Otra radio / interfaz con VOX", value=RADIO_VOX,
-                        variable=self.radio_var).grid(row=1, column=2, sticky="w", **pad)
+        row = ttk.Frame(cfg)
+        row.grid(row=1, column=0, sticky="w")
+        ttk.Label(row, text="Radio:", width=14).pack(side="left", **pad)
+        self.radio_var = tk.StringVar()
+        self.radio_box = ttk.Combobox(row, textvariable=self.radio_var, width=40, state="readonly", height=20)
+        self.radio_box.pack(side="left", **pad)
+        self.radio_box.bind("<<ComboboxSelected>>", self.on_radio_selected)
 
-        ttk.Label(cfg, text="Puerto CI-V:").grid(row=2, column=0, sticky="w", **pad)
-        self.port_var = tk.StringVar(value=self.settings.com_port)
-        self.port_box = ttk.Combobox(cfg, textvariable=self.port_var, width=10, state="readonly")
-        self.port_box.grid(row=2, column=1, sticky="w", **pad)
-        ttk.Button(cfg, text="Buscar IC-7100", command=self.find_radio).grid(row=2, column=2, sticky="w", **pad)
+        row = ttk.Frame(cfg)
+        row.grid(row=2, column=0, sticky="w")
+        ttk.Label(row, text="Conexión PTT:", width=14).pack(side="left", **pad)
+        self.method_var = tk.StringVar()
+        self.method_box = ttk.Combobox(row, textvariable=self.method_var, width=58, state="readonly")
+        self.method_box.pack(side="left", **pad)
+        self.method_box.bind("<<ComboboxSelected>>", self.on_method_selected)
 
-        ttk.Label(cfg, text="Audio:").grid(row=3, column=0, sticky="w", **pad)
+        self.port_row = ttk.Frame(cfg)
+        self.port_row.grid(row=3, column=0, sticky="w")
+        ttk.Label(self.port_row, text="Puerto COM:", width=14).pack(side="left", **pad)
+        self.port_var = tk.StringVar()
+        self.port_box = ttk.Combobox(self.port_row, textvariable=self.port_var, width=40, state="readonly")
+        self.port_box.pack(side="left", **pad)
+        self.baud_label = ttk.Label(self.port_row, text="Velocidad:")
+        self.baud_label.pack(side="left", **pad)
+        self.baud_var = tk.StringVar(value=str(self.settings.baud))
+        self.baud_box = ttk.Combobox(self.port_row, textvariable=self.baud_var, width=8, state="readonly",
+                                     values=[str(b) for b in radios.BAUD_RATES])
+        self.baud_box.pack(side="left", **pad)
+        self.find_btn = ttk.Button(self.port_row, text="Buscar radio", command=self.find_radio)
+        self.find_btn.pack(side="left", **pad)
+
+        self.serial_row = ttk.Frame(cfg)
+        self.serial_row.grid(row=4, column=0, sticky="w")
+        ttk.Label(self.serial_row, text="Línea PTT:", width=14).pack(side="left", **pad)
+        self.line_var = tk.StringVar()
+        ttk.Combobox(self.serial_row, textvariable=self.line_var, width=10, state="readonly",
+                     values=list(LINE_LABELS.values())).pack(side="left", **pad)
+        ttk.Label(self.serial_row, text="Activa en nivel bajo:").pack(side="left", **pad)
+        self.invert_var = tk.StringVar()
+        ttk.Combobox(self.serial_row, textvariable=self.invert_var, width=10, state="readonly",
+                     values=list(INVERT_LABELS.values())).pack(side="left", **pad)
+
+        self.cm108_row = ttk.Frame(cfg)
+        self.cm108_row.grid(row=5, column=0, sticky="w")
+        ttk.Label(self.cm108_row, text="GPIO CM108:", width=14).pack(side="left", **pad)
+        self.gpio_var = tk.StringVar()
+        ttk.Combobox(self.cm108_row, textvariable=self.gpio_var, width=4, state="readonly",
+                     values=["1", "2", "3", "4"]).pack(side="left", **pad)
+        ttk.Label(self.cm108_row, text="(la mayoría usa 3)").pack(side="left", **pad)
+
+        self.hint_var = tk.StringVar()
+        ttk.Label(cfg, textvariable=self.hint_var, wraplength=680, foreground="#555").grid(
+            row=6, column=0, sticky="w", **pad)
+
+        row = ttk.Frame(cfg)
+        row.grid(row=7, column=0, sticky="w")
+        self.ptt_btn = ttk.Button(row, text="Probar PTT (transmite 1 segundo)", command=self.test_ptt)
+        self.ptt_btn.pack(side="left", **pad)
+
+        row = ttk.Frame(cfg)
+        row.grid(row=8, column=0, sticky="w")
+        ttk.Label(row, text="Audio:", width=14).pack(side="left", **pad)
         self.audio_var = tk.StringVar(value="(sin detectar)")
-        ttk.Label(cfg, textvariable=self.audio_var).grid(row=3, column=1, columnspan=2, sticky="w", **pad)
-        ttk.Button(cfg, text="Detectar audio", command=self.detect_audio).grid(row=3, column=3, sticky="w", **pad)
+        ttk.Label(row, textvariable=self.audio_var).pack(side="left", **pad)
+        ttk.Button(row, text="Detectar audio", command=self.detect_audio).pack(side="left", **pad)
+
+        self._show_radio_settings()
 
         run = ttk.LabelFrame(frm, text="Prueba", padding=8)
         run.pack(fill="x", pady=(8, 0))
@@ -139,22 +268,187 @@ class App:
             btn.configure(state="normal" if running else "disabled")
 
     # ---------- actions ----------
+    # ---------- radio selection ----------
+    def _radio_choices(self) -> list[str]:
+        choices = [p.label for p in radios.PRESETS]
+        if self.settings.radio_key == radios.KEY_OTHER:
+            choices.append(self.settings.radio_name)
+        return choices + [RADIO_OTHER_LABEL, RADIO_VOX_LABEL]
+
+    def _allowed_methods(self) -> list[str]:
+        if self.settings.radio_key == radios.KEY_VOX:
+            return [radios.PTT_VOX, radios.PTT_SERIAL, radios.PTT_CM108]
+        return [radios.PTT_CAT, radios.PTT_SERIAL, radios.PTT_CM108, radios.PTT_VOX]
+
+    def _show_radio_settings(self) -> None:
+        """Put self.settings into the widgets and show only the rows the PTT method needs."""
+        s = self.settings
+        self.radio_box["values"] = self._radio_choices()
+        self.radio_var.set(RADIO_VOX_LABEL if s.radio_key == radios.KEY_VOX else s.radio_name)
+        methods = self._allowed_methods()
+        if s.ptt_method not in methods:
+            s.ptt_method = methods[0]
+        self.method_box["values"] = [METHOD_LABELS[m] for m in methods]
+        self.method_var.set(METHOD_LABELS[s.ptt_method])
+        self.baud_var.set(str(s.baud))
+        self.line_var.set(LINE_LABELS.get(s.serial_line, LINE_LABELS["rts"]))
+        self.invert_var.set(INVERT_LABELS.get(s.serial_invert, INVERT_LABELS["none"]))
+        self.gpio_var.set(str(s.cm108_gpio))
+
+        method = s.ptt_method
+        uses_port = method in (radios.PTT_CAT, radios.PTT_SERIAL)
+        self.port_row.grid() if uses_port else self.port_row.grid_remove()
+        self.serial_row.grid() if method == radios.PTT_SERIAL else self.serial_row.grid_remove()
+        self.cm108_row.grid() if method == radios.PTT_CM108 else self.cm108_row.grid_remove()
+        for widget in (self.baud_label, self.baud_box, self.find_btn):
+            widget.pack_forget()
+        if method == radios.PTT_CAT:
+            self.baud_label.pack(side="left", padx=6, pady=4)
+            self.baud_box.pack(side="left", padx=6, pady=4)
+            self.find_btn.pack(side="left", padx=6, pady=4)
+        self.ptt_btn.configure(state="disabled" if method == radios.PTT_VOX else "normal")
+        self.hint_var.set(self._hint())
+
+    def _hint(self) -> str:
+        s = self.settings
+        preset = radios.PRESETS_BY_KEY.get(s.radio_key)
+        if s.ptt_method == radios.PTT_CAT:
+            if preset:
+                return preset.hint + " Pulse Buscar radio para encontrar el puerto y la velocidad."
+            if s.cat_protocol == radios.PROTO_ICOM:
+                return "Pulse Buscar radio. Si no la encuentra, elija puerto y velocidad a mano y pulse Probar PTT."
+            return ("Elija el puerto COM y la velocidad CAT que tiene configurados en la radio, "
+                    "y pulse Probar PTT.")
+        if s.ptt_method == radios.PTT_SERIAL:
+            return ("Elija el puerto COM de la interfaz (Digirig, AIOC, cable casero) o el puerto "
+                    "\"Standard\" de un Yaesu. Casi siempre la línea es RTS. Pulse Probar PTT.")
+        if s.ptt_method == radios.PTT_CM108:
+            return "La interfaz se detecta sola. Conecte solo una interfaz CM108 y pulse Probar PTT."
+        return ("VOX: la radio pasa a transmitir sola al recibir audio. Active el VOX de la radio "
+                "(o de la interfaz) y use un tiempo de VOX corto.")
+
+    def _read_radio_widgets(self) -> None:
+        """Copy the widgets into self.settings (radio choice is applied when selected)."""
+        s = self.settings
+        s.ptt_method = METHOD_BY_LABEL.get(self.method_var.get(), s.ptt_method)
+        s.com_port = self.port_var.get().split(PORT_SEPARATOR)[0].strip()
+        if self.baud_var.get().isdigit():
+            s.baud = int(self.baud_var.get())
+        s.serial_line = _key_for(LINE_LABELS, self.line_var.get(), "rts")
+        s.serial_invert = _key_for(INVERT_LABELS, self.invert_var.get(), "none")
+        if self.gpio_var.get().isdigit():
+            s.cm108_gpio = int(self.gpio_var.get())
+
+    def on_radio_selected(self, _event=None) -> None:
+        self._read_radio_widgets()
+        choice = self.radio_var.get()
+        if choice == RADIO_OTHER_LABEL:
+            self.open_model_list()
+        elif choice == RADIO_VOX_LABEL:
+            self.settings.apply_vox()
+        elif choice != self.settings.radio_name or self.settings.radio_key == radios.KEY_VOX:
+            preset = next((p for p in radios.PRESETS if p.label == choice), None)
+            if preset:
+                self.settings.apply_preset(preset)
+        self._show_radio_settings()
+
+    def on_method_selected(self, _event=None) -> None:
+        self._read_radio_widgets()
+        self._show_radio_settings()
+
+    def open_model_list(self) -> None:
+        if self.hamlib_models:
+            ModelPicker(self.root, self.hamlib_models, self.on_model_picked)
+            return
+
+        def work():
+            self.log("Leyendo la lista de radios de hamlib…")
+            models = radios.list_models(paths.mercury_exe())
+            if not models:
+                self.log("No se pudo leer la lista de radios de Mercury.")
+                return
+            self.hamlib_models = models
+            self.log(f"{len(models)} modelos disponibles.")
+            self.in_ui(lambda: ModelPicker(self.root, models, self.on_model_picked))
+        self.run_bg(work)
+
+    def on_model_picked(self, model: "radios.HamlibModel | None") -> None:
+        if model is not None:
+            self._read_radio_widgets()
+            self.settings.apply_hamlib_model(model)
+            self.log(f"Radio elegida: {model.label} (hamlib {model.id}).")
+        self._show_radio_settings()
+
+    # ---------- ports and PTT ----------
     def refresh_ports(self) -> None:
-        ports = civ.list_com_ports()
-        self.port_box["values"] = ports
-        if self.port_var.get() not in ports:
-            self.port_var.set(ports[0] if ports else "")
+        described = radios.describe_com_ports()
+        values = [f"{port}{PORT_SEPARATOR}{described[port]}" if described.get(port) else port
+                  for port in radios.list_com_ports()]
+        self.port_box["values"] = values
+        current = self.settings.com_port
+        match = next((v for v in values if v.split(PORT_SEPARATOR)[0] == current), None)
+        self.port_var.set(match or (values[0] if values else ""))
+
+    def _station_must_be_stopped(self) -> bool:
+        if self.station is not None:
+            messagebox.showinfo("hr-mail", "Primero pulse Detener: la estación está usando la radio.")
+            return False
+        return True
 
     def find_radio(self) -> None:
+        if not self._station_must_be_stopped():
+            return
+        self._read_radio_widgets()
+        s = self.settings
+        if s.cat_protocol == radios.PROTO_NONE:
+            messagebox.showinfo("hr-mail", "Para este modelo no hay búsqueda automática.\n"
+                                "Elija el puerto y la velocidad a mano y pulse Probar PTT.")
+            return
+        protocol, baud, civ_addr = s.cat_protocol, s.baud, radios.parse_civ(s.civ_addr)
+        preset = radios.PRESETS_BY_KEY.get(s.radio_key)
+        if preset and preset.civ_addr is not None:
+            civ_addr = preset.civ_addr
+
         def work():
-            self.log("Buscando el IC-7100 en los puertos COM…")
-            for port in civ.list_com_ports():
-                if civ.probe(port):
-                    self.log(f"IC-7100 encontrado en {port}.")
-                    self.in_ui(lambda p=port: self.port_var.set(p))
-                    return
-            self.log("No respondió ningún puerto. En el IC-7100 revise: Set > Connectors > "
-                     "CI-V USB Baud Rate = 19200.")
+            self.in_ui(self.refresh_ports)
+            self.log(f"Buscando {s.radio_name} en los puertos COM (no transmite)…")
+            found = radios.find_radio(protocol, baud, civ_addr)
+            if found is None:
+                self.log("No respondió ningún puerto. " + self._hint())
+                return
+            s.com_port, s.baud = found.port, found.baud
+            if found.civ_addr is not None:
+                s.civ_addr = radios.format_civ(found.civ_addr)
+            extra = f", CI-V {s.civ_addr}" if found.civ_addr is not None else ""
+            self.log(f"Radio encontrada en {found.port} a {found.baud} baudios{extra}.")
+            self.in_ui(self.refresh_ports)
+            self.in_ui(self._show_radio_settings)
+        self.run_bg(work)
+
+    def test_ptt(self) -> None:
+        if not self._station_must_be_stopped():
+            return
+        self._read_radio_widgets()
+        s = self.settings
+        if s.ptt_method in (radios.PTT_CAT, radios.PTT_SERIAL) and not s.com_port:
+            messagebox.showerror("hr-mail", "Elija el puerto COM.")
+            return
+        if not messagebox.askokcancel("hr-mail", "La radio va a transmitir 1 segundo.\n"
+                                      "Verifique que hay una antena o carga conectada."):
+            return
+
+        def work():
+            self.log(f"Probando PTT ({METHOD_LABELS[s.ptt_method]})…")
+            ok, output = run_ptt_test(s)
+            if ok:
+                self.log("Mercury activó y soltó el PTT. ¿La radio transmitió 1 segundo? "
+                         "Si no, revise los ajustes indicados arriba.")
+                settings_mod.save(s, self.settings_path)
+            else:
+                self.log("La prueba de PTT falló:")
+                for line in output.splitlines()[-8:]:
+                    self.log(f"  {line}")
+                self.log(self._hint())
         self.run_bg(work)
 
     def detect_audio(self) -> None:
@@ -187,10 +481,14 @@ class App:
         if not is_valid_callsign(call):
             messagebox.showerror("hr-mail", "Escriba un indicativo válido, por ejemplo XQ2CG.")
             return None
+        self._read_radio_widgets()
         s = self.settings
-        s.callsign, s.radio, s.com_port = call, self.radio_var.get(), self.port_var.get()
-        if s.radio == RADIO_IC7100 and not s.com_port:
-            messagebox.showerror("hr-mail", "Elija el puerto del IC-7100 (o pulse Buscar IC-7100).")
+        s.callsign = call
+        if s.ptt_method in (radios.PTT_CAT, radios.PTT_SERIAL) and not s.com_port:
+            messagebox.showerror("hr-mail", "Elija el puerto COM de la radio (o pulse Buscar radio).")
+            return None
+        if s.ptt_method == radios.PTT_CAT and s.hamlib_model <= 0:
+            messagebox.showerror("hr-mail", "Elija el modelo de la radio.")
             return None
         if not (s.input_device and s.output_device):
             messagebox.showerror("hr-mail", "No hay audio de la radio. Pulse Detectar audio.")

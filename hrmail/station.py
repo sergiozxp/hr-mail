@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import civ, mercury, pat, paths
-from .settings import RADIO_IC7100, Settings
+from . import mercury, pat, paths, radios
+from .settings import Settings
 
 Log = Callable[[str], None]
 
@@ -130,9 +130,28 @@ class Station:
             if child is not None:
                 child.stop()
         # Safety: never leave the radio keyed if Mercury was killed during TX.
-        if self.settings.radio == RADIO_IC7100 and self.settings.com_port:
-            try:
-                civ.set_ptt(self.settings.com_port, False)
-            except Exception:  # noqa: BLE001 - best effort on shutdown
-                pass
+        release_ptt(self.settings)
         self.mercury = self.pat = self.client = self.events = None
+
+
+def release_ptt(s: Settings) -> None:
+    """Best effort: tell a CAT-keyed radio to stop transmitting."""
+    if s.ptt_method != radios.PTT_CAT:
+        return  # serial and CM108 lines drop when Mercury exits; VOX needs nothing
+    try:
+        radios.release_ptt(s.cat_protocol, s.com_port, s.baud, radios.parse_civ(s.civ_addr))
+    except Exception:  # noqa: BLE001 - best effort on shutdown
+        pass
+
+
+def test_ptt(s: Settings) -> tuple[bool, str]:
+    """Key the radio for one second through Mercury, with the same [ptt] it will use."""
+    exe = paths.mercury_exe()
+    if not exe.exists():
+        raise RuntimeError(f"Falta el programa {exe}")
+    ini = paths.data_dir() / "mercury-ptt-test.ini"
+    ini.write_text(mercury.render_ini(s), encoding="utf-8")
+    try:
+        return radios.test_ptt(exe, ini)
+    finally:
+        release_ptt(s)

@@ -5,14 +5,10 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .settings import RADIO_IC7100, Settings
+from . import radios
+from .settings import Settings
 
 ARQ_PORT = 8300  # control; data is ARQ_PORT + 1 (VARA-compatible)
-
-# IC-7100 defaults (verified with a real radio, see SPEC.md section 1).
-IC7100_HAMLIB_MODEL = 3070
-IC7100_CIV_ADDR = "0x88"
-IC7100_BAUD = 19200
 
 _DEVICE_RE = re.compile(r"name:\s*'(?P<name>.*?)'\s+id:\s*'(?P<id>.*?)'(?P<default>\s*\(system default\))?")
 
@@ -82,16 +78,7 @@ def render_ini(settings: Settings) -> str:
         "",
         "[ptt]",
     ]
-    if settings.radio == RADIO_IC7100:
-        lines += [
-            "method = hamlib",
-            f"device = {settings.com_port}",
-            f"hamlib_model = {IC7100_HAMLIB_MODEL}",
-            f"hamlib_serial_speed = {IC7100_BAUD}",
-            f"hamlib_conf = civaddr={IC7100_CIV_ADDR}",
-        ]
-    else:  # VOX: the radio keys itself on audio
-        lines += ["method = none"]
+    lines += ptt_lines(settings)
     lines += [
         "",
         "[store]",
@@ -100,6 +87,31 @@ def render_ini(settings: Settings) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def ptt_lines(s: Settings) -> list[str]:
+    """The [ptt] section body for the chosen radio connection."""
+    if s.ptt_method == radios.PTT_CAT:
+        lines = [
+            "method = hamlib",
+            f"device = {s.com_port}",
+            f"hamlib_model = {s.hamlib_model}",
+            f"hamlib_serial_speed = {s.baud}",
+        ]
+        if s.civ_addr:
+            lines.append(f"hamlib_conf = civaddr={s.civ_addr}")
+        return lines
+    if s.ptt_method == radios.PTT_SERIAL:
+        return [
+            "method = serial",
+            f"device = {s.com_port}",
+            f"line = {s.serial_line}",
+            f"invert = {s.serial_invert}",
+        ]
+    if s.ptt_method == radios.PTT_CM108:
+        # Mercury finds the CM108 HID device on its own.
+        return ["method = cm108", f"cm108_gpio = {s.cm108_gpio}"]
+    return ["method = none"]  # VOX: the radio keys itself on audio
 
 
 def command(mercury_exe: Path, ini_path: Path) -> list[str]:

@@ -16,7 +16,22 @@ and [docs/pat-api.md](docs/pat-api.md) for the parts of Pat that hr-mail relies 
 
 **Stage 1** — diagnostic window: starts Mercury and Pat with generated configs,
 queues a test message, connects to another station, shows the mailbox.
-Supported radios: ICOM IC-7100 (USB cable, CI-V PTT) and any radio/interface with VOX.
+
+**Radios (v0.2.0)** — any radio Hamlib supports, chosen with the mouse:
+
+- Presets with factory settings and menu hints: ICOM IC-7100, IC-7300, IC-705, IC-7610,
+  IC-9700, IC-7600, IC-7410, IC-7200; Yaesu FT-710, FT-991/991A, FT-891, FTDX10,
+  FTDX101D/MP, FTDX3000; Kenwood TS-590S/SG, TS-890S, TS-480; Elecraft K3/K3S, KX3,
+  KX2, K4; Xiegu G90, X6100.
+- "Otro modelo": the full Hamlib list from the bundled Mercury (`mercury -K`), searchable.
+- PTT by CAT (Hamlib), by RTS/DTR on a COM port (Digirig, AIOC, home-brew cables),
+  by CM108 GPIO, or VOX.
+- "Buscar radio" finds the COM port and CAT speed (Icom CI-V, Yaesu and Kenwood/Elecraft
+  ASCII CAT) without transmitting. "Probar PTT" keys the radio for one second through
+  Mercury (`mercury -Q`) with the same settings the station will use.
+
+Only the IC-7100 has been verified on the air so far; the other presets use Hamlib's
+model numbers and the radios' factory CAT settings.
 
 ## Download
 

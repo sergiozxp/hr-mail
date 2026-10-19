@@ -43,9 +43,11 @@ plus a per-user data folder (`%LOCALAPPDATA%\hr-mail`).
 
 ### 2.2 First-run wizard (once)
 1. **Indicativo** — text field (uppercased automatically, validated as a callsign).
-2. **Radio** — choose one:
-   - `ICOM IC-7100 (cable USB)`
-   - `Otra radio / interfaz con VOX`
+2. **Radio** — mouse only (v0.2.0, see §5):
+   - a preset (IC-7100, IC-7300, FT-710, TS-590SG, KX3, G90, …),
+   - `Otro modelo (lista completa de hamlib)…` — searchable list from `mercury -K`,
+   - `Otra radio sin CAT (VOX, Digirig, CM108)`.
+   Then the PTT connection: CAT (Hamlib), RTS/DTR line, CM108 GPIO or VOX.
 3. **Detección automática** (no user input):
    - Audio: run `mercury.exe -z`, pick the capture and playback devices whose name contains
      `USB Audio CODEC` (fallback: any name containing `USB`). If zero or several match,
@@ -131,5 +133,35 @@ but correct.
 5. **Stage 5 — Field test with station B** and fixes. Spanish one-page user guide with
    screenshots (`docs/guia-usuario.pdf`).
 
-Later (not v1): more radio presets (IC-7300, FT-991A, FT-891 + Digirig), frequency control,
+## 5. Radio support (v0.2.0)
+
+Mercury does all radio control; hr-mail only writes its `[ptt]` section.
+Mercury 1.9.19 bundles Hamlib 4.6.5 and offers `-K` (list Hamlib models) and
+`-Q` (key the configured PTT for one second, release, exit).
+
+- **Settings**: `radio_key` (preset key, `hamlib` for a model from the full list, `vox`),
+  `radio_name`, `hamlib_model`, `cat_protocol` (`icom`, `yaesu`, `kenwood` or empty),
+  `ptt_method` (`hamlib`, `serial`, `cm108`, `none`), `com_port`, `baud`, `civ_addr`,
+  `serial_line`, `serial_invert`, `cm108_gpio`. Settings from 0.1.0 (`radio`) are migrated.
+- **`[ptt]` generated**:
+  - CAT: `method=hamlib`, `device=<COM>`, `hamlib_model`, `hamlib_serial_speed=<baud>`,
+    and `hamlib_conf=civaddr=<addr>` for Icom-style radios (IC-7100 output is unchanged
+    from the verified baseline).
+  - RTS/DTR: `method=serial`, `device`, `line` (rts/dtr/both), `invert` (none/rts/dtr/both).
+  - CM108: `method=cm108`, `cm108_gpio` (Mercury finds the HID device).
+  - VOX: `method=none`.
+- **Presets** (`hrmail/radios.py`): Hamlib model number, first CAT speed to try,
+  command family, factory CI-V address, and a one-line Spanish hint about radio menus.
+  Model numbers checked against Hamlib 4.6.5 `riglist.h`.
+- **Buscar radio** never transmits. It tries every COM port at the preset speed first,
+  then 38400, 19200, 115200, 9600, 4800, 57600, with RTS/DTR held low:
+  Icom/Xiegu CI-V "read frequency" to the preset address and to broadcast 0x00
+  (the reply gives the radio's real address); Yaesu and Kenwood/Elecraft `FA;`.
+  Models from the full list get a search only if they are Icom/Xiegu.
+- **Probar PTT** (station stopped): writes `mercury-ptt-test.ini` and runs `mercury -Q`.
+- **Release on stop**: after Mercury is stopped, CAT radios get an explicit unkey
+  (CI-V `1C 00 00`, Yaesu `TX0;`, Kenwood/Elecraft `RX;` — never Kenwood `TX0;`, which keys).
+  Serial and CM108 lines drop when Mercury exits.
+
+Later (not v1): frequency control,
 broadcast/net messages, store-and-forward relaying between stations.

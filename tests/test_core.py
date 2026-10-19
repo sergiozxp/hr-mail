@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 from hrmail import mercury, pat
-from hrmail.settings import RADIO_IC7100, RADIO_VOX, Settings, is_valid_callsign, load, save
+from hrmail import radios
+from hrmail.settings import Settings, is_valid_callsign, load, save
 
 # Real `mercury.exe -z` output from an IC-7100 station (Windows 11).
 MERCURY_Z = """Loaded configuration from mercury.ini
@@ -32,7 +33,7 @@ def test_pick_radio_device_ambiguous_returns_none():
 
 
 def test_ini_ic7100_matches_verified_baseline():
-    s = Settings("XQ2CG", RADIO_IC7100, "COM3", "IN-ID", "OUT-ID")
+    s = Settings(callsign="XQ2CG", com_port="COM3", input_device="IN-ID", output_device="OUT-ID")
     ini = mercury.render_ini(s)
     for line in ("input_device = IN-ID", "output_device = OUT-ID", "arq_tcp_base_port = 8300",
                  "method = hamlib", "device = COM3", "hamlib_model = 3070",
@@ -41,7 +42,9 @@ def test_ini_ic7100_matches_verified_baseline():
 
 
 def test_ini_vox_has_no_ptt():
-    ini = mercury.render_ini(Settings("XQ2CG", RADIO_VOX, "", "I", "O"))
+    s = Settings(callsign="XQ2CG", input_device="I", output_device="O")
+    s.apply_vox()
+    ini = mercury.render_ini(s)
     assert "method = none" in ini.splitlines()
     assert "hamlib" not in ini
 
@@ -73,7 +76,7 @@ def test_callsigns():
 
 def test_settings_roundtrip(tmp_path: Path):
     path = tmp_path / "settings.json"
-    s = Settings("XQ2CG", RADIO_IC7100, "COM3", "I", "O")
+    s = Settings(callsign="XQ2CG", com_port="COM3", input_device="I", output_device="O")
     save(s, path)
     assert load(path) == s
     path.write_text(json.dumps({"callsign": "XQ2CG", "unknown_key": 1}))
